@@ -1,5 +1,6 @@
 import asyncio
 import math
+import re
 from dataclasses import dataclass
 
 from playwright.async_api import Locator, Page, TimeoutError
@@ -16,6 +17,7 @@ class CatalogSelectors:
     progress: str | None = None
     progress_attribute: str | None = None
     course_title: str | None = None
+    click_target: str | None = None
 
 
 WISDOM_CATALOG = CatalogSelectors(
@@ -32,11 +34,15 @@ WISDOM_CATALOG = CatalogSelectors(
 
 FUSION_CATALOG = CatalogSelectors(
     name="fusion",
-    # 真实融合课小节的容器是 .chapter-item(完整课时列表, 含 finish-icon);
-    # .chapter-content-second 只是"当前展开层级的子节点"(真站实测仅 4/58),
-    # 用它会漏采大部分课时, 故校准为 .chapter-item。
-    item=".chapter-item",
-    active=".chapter-content-second.current",
+    # Only select leaf lessons. Chapter containers can contain several lessons,
+    # so their first progress ring/finish icon belongs to a different lesson.
+    item=(
+        ".chapter-content-second:has(.item-name)"
+        ":not(:has(.chapter-content-second, .chapter-item)), "
+        ".chapter-item:has(.item-name)"
+        ":not(:has(.chapter-item, .chapter-content-second))"
+    ),
+    active=".chapter-content-second.current, .chapter-item.current, .item-box.current",
     finish=".finish-icon",
     title=".item-name",
     active_class="current",
@@ -45,6 +51,7 @@ FUSION_CATALOG = CatalogSelectors(
     # 补上后 lesson_progress 能读到中间值, 支撑"播完未到100->回退重播"上报。
     progress=".el-progress",
     progress_attribute="aria-valuenow",
+    click_target=".item-name",
 )
 
 HIKE_CATALOG = CatalogSelectors(
@@ -67,9 +74,12 @@ LEGACY_CATALOG = CatalogSelectors(
     active_class="current_play",
     progress=".progress-num",
     course_title=".source-name",
+    click_target="#lessonOrder",
 )
 
 CATALOGS = (WISDOM_CATALOG, FUSION_CATALOG, HIKE_CATALOG, LEGACY_CATALOG)
+
+_LESSON_NUMBER = re.compile(r"^\s*(\d+(?:\.\d+)+)(?=[^\d.]|$)")
 
 
 def parse_progress_value(value) -> int:
@@ -151,35 +161,47 @@ async def wait_for_lesson_active(
     lesson: Locator, catalog: CatalogSelectors, timeout_ms: int = 8_000
 ) -> bool:
     deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
-    # 一些目录结构(如融合课)的"当前激活"标识挂在课时内部子节点上
-    # (例如 .chapter-item 内的 .chapter-content-second.current), 课时自身无 active class,
-    # 因此除了检查本节点 active_class, 还需回退检查内部是否命中 catalog.active。
-    has_active_descendant = bool(catalog.active)
     while asyncio.get_running_loop().time() < deadline:
         if has_class(await lesson.get_attribute("class"), catalog.active_class):
             return True
-        if has_active_descendant:
-            try:
-                if await lesson.locator(catalog.active).count() > 0:
-                    return True
-            except Exception:
-                has_active_descendant = False
+        if catalog.active and await lesson.locator(catalog.active).count() > 0:
+            return True
         await asyncio.sleep(0.2)
     return False
+
+
+async def click_lesson(
+    lesson: Locator, catalog: CatalogSelectors, timeout_ms: int = 10_000
+) -> None:
+    target = lesson
+    if catalog.click_target:
+        label = lesson.locator(catalog.click_target).first
+        if await label.count():
+            target = label
+    await target.click(timeout=timeout_ms)
 
 
 async def get_lesson_title(
     page: Page, lesson: Locator, catalog: CatalogSelectors
 ) -> str:
-    scoped = lesson.locator(catalog.title).first
-    title_element = scoped if await scoped.count() else page.locator(catalog.title).first
+    # A missing label must not fall back to an unrelated title elsewhere on
+    # the page (for example, the first chapter or a course-summary row).
+    title_element = lesson.locator(catalog.title).first
+    title = ""
     if await title_element.count():
-        title = await title_element.get_attribute("title")
-        if title:
-            return title.strip()
-        text = await title_element.text_content()
-        if text:
-            return " ".join(text.split())
+        title = await title_element.get_attribute("title") or ""
+        if not title.strip():
+            title = await title_element.text_content() or ""
+        title = " ".join(title.split())
 
-    text = await lesson.text_content()
-    return " ".join((text or "当前课时").split())
+    if title and catalog.name != "fusion":
+        return title
+
+    row_text = " ".join((await lesson.text_content() or "").split())
+    if title:
+        # Fusion renders the lesson number separately from .item-name.
+        number = _LESSON_NUMBER.match(row_text)
+        if number and not _LESSON_NUMBER.match(title):
+            return f"{number.group(1)} {title}"
+        return title
+    return row_text or "当前课时"
