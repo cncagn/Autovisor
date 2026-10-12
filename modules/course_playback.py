@@ -19,6 +19,7 @@ from modules.utils import get_video_attr, run_on
 from modules.fusion_adapter import FusionAdapter
 from modules.video_state import (
     has_valid_duration,
+    is_valid_video_time,
     tail_retry_time,
     time_for_percent,
     video_at_end,
@@ -145,7 +146,7 @@ async def learn_lesson(
                 last_activity = time.monotonic()
 
             current_time = await get_video_attr(page, "currentTime")
-            if isinstance(current_time, (int, float)) and current_time > last_video_time + 0.25:
+            if is_valid_video_time(current_time) and abs(current_time - last_video_time) > 0.25:
                 last_video_time = current_time
                 last_activity = time.monotonic()
             logger.event(
@@ -356,7 +357,7 @@ async def review_lesson(
                     暂停=f"{paused_time:.1f}s",
                 )
                 return paused_time, True, False
-            if isinstance(current_time, (int, float)) and current_time > last_video_time + 0.25:
+            if is_valid_video_time(current_time) and abs(current_time - last_video_time) > 0.25:
                 last_video_time = current_time
                 last_activity = time.monotonic()
             logger.event(
