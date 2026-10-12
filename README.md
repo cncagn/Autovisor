@@ -1,5 +1,7 @@
 ##  Autovisor
 
+本 fork 的上游问题检查和修复范围见 [2026-10-12 issue 检查记录](docs/upstream-issue-audit-2026-10-12.md)。记录区分已验证的代码修复、已有支持与仍需真实课程页面验证的问题。
+
 **Github项目主页：**[CXRunfree/Autovisor](https://github.com/CXRunfree/Autovisor)
 
 ------
