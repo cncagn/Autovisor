@@ -141,26 +141,39 @@ async def display_window(page: Page) -> None:
         await page.bring_to_front()
         logger.info("播放标签页已前置.", shift=True)
         return
-    window = await get_browser_window(page)
-    if window:
-        window.show()
-        window.restore()
-        window.moveTo(100, 100)
+    if await _change_browser_window(page, visible=True):
         logger.info("播放窗口已自动前置.", shift=True)
-    else:
-        logger.warn("未找到播放窗口!")
 
 
 async def hide_window(page: Page) -> None:
     if sys.platform != "win32":
         logger.warn("macOS 不支持隐藏单个 Chrome 窗口,将保持可见以便处理验证.")
         return
-    window = await get_browser_window(page)
-    if window:
-        window.hide()
+    if await _change_browser_window(page, visible=False):
         logger.info("播放窗口已自动隐藏,将在需要安全验证时显示.")
-    else:
-        logger.warn("未找到播放窗口!")
+
+
+async def _change_browser_window(page: Page, visible: bool) -> bool:
+    # Chromium can replace a window between enumeration and MoveWindow.
+    # Reacquire once; a stale native handle must not terminate course playback.
+    for attempt in range(2):
+        try:
+            window = await get_browser_window(page)
+            if window is None:
+                break
+            if visible:
+                window.show()
+                window.restore()
+                window.moveTo(100, 100)
+            else:
+                window.hide()
+            return True
+        except gw.PyGetWindowException as exc:
+            logger.debug_throttled(
+                "browser_window", f"窗口操作失败(尝试 {attempt + 1}/2): {exc}"
+            )
+    logger.warn("无法操作播放窗口,请手动切换浏览器窗口.")
+    return False
 
 
 async def get_browser_window(page: Page) -> object | None:

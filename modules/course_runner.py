@@ -6,6 +6,7 @@ from playwright.async_api import Page
 from modules.course_playback import elapsed_minutes, learn_lesson, review_lesson
 from modules.lesson_navigation import (
     CatalogSelectors,
+    click_lesson,
     detect_catalog,
     lesson_progress,
     wait_for_lesson_active,
@@ -84,7 +85,7 @@ async def run_course(
     for index, lesson in enumerate(lessons):
         position = f"{index + 1}/{len(lessons)}"
         playback_enabled.clear()
-        await lesson.click(timeout=LESSON_CLICK_TIMEOUT_MS)
+        await click_lesson(lesson, catalog, LESSON_CLICK_TIMEOUT_MS)
         active = await wait_for_lesson_active(lesson, catalog)
         if not active:
             logger.warn("课时切换超时,正在重试一次.", shift=True)
@@ -94,7 +95,7 @@ async def run_course(
                 目录类型=catalog.name,
                 选择器=catalog.active,
             )
-            await lesson.click(timeout=LESSON_CLICK_TIMEOUT_MS)
+            await click_lesson(lesson, catalog, LESSON_CLICK_TIMEOUT_MS)
             active = await wait_for_lesson_active(lesson, catalog)
         if not active:
             logger.error(f"无法选中课时,目录类型: {catalog.name}")
