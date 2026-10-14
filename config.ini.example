@@ -19,7 +19,13 @@ showDonateCode = True
 
 [course-option]
 ;限制每门课程刷课时长/min (不限制:0)
-limitMaxTime = 30
+limitMaxTime = 0
+;每个账号每门课程每天累计播放分钟数，跨启动保留；0 关闭每日限额
+dailyLimitMinutes = 30
+;每日记录的账号别名；换账号请更换别名或使用独立目录，留空则尝试自动识别
+studyProfile = account1
+;全部视频完成后是否复习；默认完成就停止
+reviewCompletedCourses = False
 ;限定播放倍速 (最高:1.8)
 limitSpeed = 1.0
 ;设置是否静音播放 (默认:True)
