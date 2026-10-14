@@ -19,6 +19,7 @@ from modules.course_runner import (
     run_course,
 )
 from modules.diagnostics import check_browser, check_course
+from modules.daily_study import DailyStudyBudget, StudyStore, account_key, course_key
 from modules.login import (
     LOGIN_PASSWORD_SELECTOR,
     LOGIN_SUBMIT_SELECTOR,
@@ -311,9 +312,21 @@ async def main(config) -> bool:
                             logger.event("当前课程", 名称=title)
 
                 playback_enabled.clear()
-                outcome = await run_course(
-                    page, catalog, config, logger, playback_enabled
-                )
+                study_store = None
+                try:
+                    study_budget = None
+                    if config.dailyLimitMinutes > 0:
+                        identity = account_key(await context.cookies(ZHS_COOKIE_URLS), config.studyProfile)
+                        study_store = StudyStore(get_runtime_path("data", "study-history.sqlite3"))
+                        study_budget = DailyStudyBudget(
+                            study_store, identity, course_key(course_url), config.dailyLimitMinutes
+                        )
+                    outcome = await run_course(
+                        page, catalog, config, logger, playback_enabled, study_budget=study_budget
+                    )
+                finally:
+                    if study_store is not None:
+                        study_store.close()
                 playback_enabled.clear()
                 logger.event("课程结果", 结果=outcome.value, 目录类型=catalog.name)
                 if outcome is CourseOutcome.FAILED:
@@ -321,7 +334,7 @@ async def main(config) -> bool:
                     run_ok = False
                     all_courses_complete = False
                     break
-                if outcome is CourseOutcome.TIME_LIMIT:
+                if outcome in (CourseOutcome.TIME_LIMIT, CourseOutcome.DAILY_LIMIT):
                     all_courses_complete = False
         finally:
             for task in tasks:
@@ -353,7 +366,7 @@ async def main(config) -> bool:
     if all_courses_complete:
         logger.info("所有课程已学习完毕!")
     else:
-        logger.info("本轮已按每门课程时限结束,仍有课程未完成.", shift=True)
+        logger.info("本轮已按学习时限结束，仍有课程未完成。", shift=True)
     show_donate(get_runtime_path("resources", "QRcode.jpg"), show=config.showDonateCode)
     return True
 
@@ -361,6 +374,7 @@ async def main(config) -> bool:
 def parse_args():
     parser = argparse.ArgumentParser(description="Autovisor")
     parser.add_argument("--config", default=None, help="配置文件路径(默认使用程序目录下的 config.ini)")
+    parser.add_argument("--study-history", action="store_true", help="查看本地每日学习记录，不打开浏览器")
     parser.add_argument(
         "--check-browser",
         action="store_true",
@@ -399,6 +413,22 @@ def cli() -> int:
             启动参数=(f"[{' '.join(sys.argv[1:])}]" if sys.argv[1:] else "无"),
             日志文件=logger.filename,
         )
+        if args.study_history:
+            history_path = get_runtime_path("data", "study-history.sqlite3")
+            if not os.path.isfile(history_path):
+                logger.info("暂无每日学习记录。")
+                return 0
+            store = StudyStore(history_path)
+            try:
+                rows = store.history()
+                if not rows:
+                    logger.info("暂无每日学习记录。")
+                for account, course, day, seconds in rows:
+                    print(f"{day}  账号 {account[:8]}  {seconds / 60:.2f} 分钟  {course}")
+                logger.info("以上为本地播放器计时，课程得分以平台记录为准。")
+            finally:
+                store.close()
+            return 0
         updater.check_for_update(logger)
         installer.validate_python_version()
         base_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
@@ -418,6 +448,7 @@ def cli() -> int:
             静音=config.soundOff,
             倍速=config.limitSpeed,
             时限分钟=config.limitMaxTime,
+            每日额度分钟=config.dailyLimitMinutes,
             课程数=len(config.course_urls),
             镜像源=len(config.mirrors),
         )

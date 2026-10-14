@@ -1,6 +1,7 @@
 # encoding=utf-8
 import configparser
 import json
+import math
 import os
 import re
 import sys
@@ -97,7 +98,9 @@ class Config:
         course_urls = []
         _options = self._config.options("course-url")
         for _option in _options:
-            course_url = self._config.get("course-url", _option, raw=True)
+            course_url = self._config.get("course-url", _option, raw=True).strip()
+            if not course_url:
+                continue
             matched = re.findall(self.course_match_rule, course_url)
             if not matched:
                 print(f"\"{course_url.strip()}\"\n不是一个有效网址,将忽略该网址.")
@@ -120,6 +123,26 @@ class Config:
     def limitMaxTime(self) -> float:
         self._read_config()
         return self._safe_get_float('course-option', 'limitMaxTime', 0.0)
+
+    @property
+    def dailyLimitMinutes(self) -> float:
+        self._read_config()
+        raw = self._config.get('course-option', 'dailyLimitMinutes', raw=True, fallback='0').strip()
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise ConfigError("dailyLimitMinutes 必须为非负数字，0 表示关闭每日累计限额") from exc
+        if not math.isfinite(value) or value < 0:
+            raise ConfigError("dailyLimitMinutes 必须为非负有限数字")
+        return value
+
+    @property
+    def studyProfile(self) -> str:
+        return self._config.get('course-option', 'studyProfile', raw=True, fallback='').strip()
+
+    @property
+    def reviewCompletedCourses(self) -> bool:
+        return self.get_bool_field('course-option', 'reviewCompletedCourses', fallback=False)
 
     @property
     def limitSpeed(self) -> float:

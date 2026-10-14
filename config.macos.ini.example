@@ -19,7 +19,12 @@ showDonateCode = False
 
 [course-option]
 ;限制每门课程运行时长/min (不限制:0)
-limitMaxTime = 30
+limitMaxTime = 0
+;每天累计播放限额/min；同日重启只使用剩余额度，0 关闭每日累计
+dailyLimitMinutes = 30
+;每个账号固定一个别名；换账号请改名或使用独立目录，留空则尝试自动识别
+studyProfile = account1
+reviewCompletedCourses = False
 limitSpeed = 1.0
 soundOff = True
 

@@ -2,6 +2,8 @@
 
 本 fork 的上游问题检查和修复范围见 [2026-10-12 issue 检查记录](docs/upstream-issue-audit-2026-10-12.md)。记录区分已验证的代码修复、已有支持与仍需真实课程页面验证的问题。
 
+**2026-10-14 / 3.18.5：**新增每日累计播放额度、重启续计和历史记录查看；默认每天每门课 30 分钟，全部视频完成后停止。配置、计时范围和升级方式见 [每日累计学习](docs/daily-study.md)。
+
 **Github项目主页：**[CXRunfree/Autovisor](https://github.com/CXRunfree/Autovisor)
 
 ------

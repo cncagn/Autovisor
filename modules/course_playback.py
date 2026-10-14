@@ -152,7 +152,7 @@ async def learn_lesson(
             logger.event(
                 "播放状态",
                 interval=60,
-                已学=f"{elapsed_minutes(start_time, paused_before + paused_time):.1f}min",
+                本轮计时=f"{elapsed_minutes(start_time, paused_before + paused_time):.1f}min",
                 平台进度=f"{catalog_progress}%",
                 播放器=(
                     f"{current_time:.0f}s"
@@ -363,7 +363,7 @@ async def review_lesson(
             logger.event(
                 "复习状态",
                 interval=60,
-                已学=f"{elapsed_minutes(start_time, paused_before + paused_time):.1f}min",
+                本轮计时=f"{elapsed_minutes(start_time, paused_before + paused_time):.1f}min",
                 播放器=(
                     f"{current_time:.0f}s"
                     if isinstance(current_time, (int, float))

@@ -6,6 +6,7 @@ Chrome installation locally, set AUTOVISOR_TEST_BROWSER_CHANNEL=chrome.
 
 import asyncio
 import os
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -24,6 +25,7 @@ from modules.lesson_navigation import (
     wait_for_lesson_active,
 )
 from modules.utils import get_filtered_class
+from modules.daily_study import DailyStudyBudget, SNAPSHOT_JS, StudyStore
 
 
 class FusionCatalogTests(unittest.IsolatedAsyncioTestCase):
@@ -43,6 +45,62 @@ class FusionCatalogTests(unittest.IsolatedAsyncioTestCase):
 
     async def row_ids(self, rows):
         return [await row.get_attribute("id") for row in rows]
+
+    async def test_daily_snapshot_detects_visible_overlay_and_hidden_ancestor(self):
+        await self.page.set_content('''
+            <video></video>
+            <div id="overlay"><div class="topic-title">Question</div></div>
+        ''')
+        state = await self.page.evaluate(SNAPSHOT_JS)
+        self.assertTrue(state['blocked'])
+        await self.page.locator('#overlay').evaluate("el => el.style.display = 'none'")
+        state = await self.page.evaluate(SNAPSHOT_JS)
+        self.assertFalse(state['blocked'])
+
+    async def test_daily_budget_stops_browser_playback_and_survives_reopen(self):
+        # Synthetic media clock: no course request, credentials or study upload.
+        await self.page.set_content('''
+            <div class="child-info hasvideo" onclick="this.classList.add('current')">
+              <span class="child-name">Pending lesson</span>
+              <span role="progressbar" aria-valuenow="0"></span>
+            </div>
+            <video></video>
+            <script>
+              window.pauseCalls = 0;
+              const v = document.querySelector('video'), started = performance.now();
+              Object.defineProperties(v, {
+                currentTime: {get: () => (performance.now() - started) / 1000},
+                duration: {get: () => 100},
+                readyState: {get: () => 4},
+                paused: {get: () => window.pauseCalls > 0},
+                ended: {get: () => false},
+                seeking: {get: () => false}
+              });
+              v.pause = () => {window.pauseCalls++};
+            </script>
+        ''')
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'history.sqlite3'
+            store = StudyStore(path)
+            try:
+                budget = DailyStudyBudget(store, 'fixture-account', 'fixture-course', 30)
+                store.consume(budget.account, budget.course, budget.day, 1799, 1800)
+                gate = asyncio.Event()
+                result = await asyncio.wait_for(run_course(
+                    self.page, WISDOM_CATALOG, SimpleNamespace(limitMaxTime=0),
+                    Mock(), gate, study_budget=budget,
+                ), timeout=15)
+                self.assertIs(result, CourseOutcome.DAILY_LIMIT)
+                self.assertFalse(gate.is_set())
+                self.assertGreater(await self.page.evaluate('window.pauseCalls'), 0)
+                self.assertEqual(await lesson_progress(self.page.locator(WISDOM_CATALOG.item), WISDOM_CATALOG), 0)
+            finally:
+                store.close()
+            reopened = StudyStore(path)
+            try:
+                self.assertTrue(DailyStudyBudget(reopened, 'fixture-account', 'fixture-course', 30).exhausted)
+            finally:
+                reopened.close()
 
     async def test_review_lists_nested_and_standalone_lessons_in_dom_order(self):
         rows = await get_filtered_class(self.page, FUSION_CATALOG, include_all=True)
@@ -213,7 +271,7 @@ class FusionCatalogTests(unittest.IsolatedAsyncioTestCase):
             patch("modules.course_runner.FusionAdapter.expand_catalog", new_callable=AsyncMock),
         ):
             result = await run_course(
-                self.page, FUSION_CATALOG, SimpleNamespace(limitMaxTime=0),
+                self.page, FUSION_CATALOG, SimpleNamespace(limitMaxTime=0, reviewCompletedCourses=True),
                 Mock(), asyncio.Event(),
             )
         self.assertEqual(result, CourseOutcome.COMPLETED)
