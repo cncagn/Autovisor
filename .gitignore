@@ -20,3 +20,21 @@ captcha/
 logs/
 ./preview/*
 *.egg-info/
+
+# Local workspace research, release archives, and retained previous installs.
+/Autovisor/
+/build-wheels/
+/issue-evidence/
+/*.zip
+/*.zip.sha256
+/*-browser-smoke.png
+/upstream-open-issues.json
+/upstream-issue-comments.json
+/upstream-pr-*.diff
+/Invoke-GitHub.ps1
+/pr-body.md
+/daily-pr-body.md
+/package-windows.py
+/package-daily-release.py
+/write-issue-audit.py
+/relocate-workspace.ps1
