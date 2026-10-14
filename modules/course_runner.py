@@ -1,3 +1,4 @@
+import asyncio
 import time
 from enum import Enum
 
@@ -26,6 +27,7 @@ CATALOG_ATTACH_TIMEOUT_MS = 5_000
 class CourseOutcome(Enum):
     COMPLETED = "completed"
     TIME_LIMIT = "time_limit"
+    DAILY_LIMIT = "daily_limit"
     FAILED = "failed"
 
 
@@ -54,6 +56,7 @@ async def run_course(
     config,
     logger,
     playback_enabled,
+    study_budget=None,
 ) -> CourseOutcome:
     await page.wait_for_selector(
         catalog.item, state="attached", timeout=CATALOG_ATTACH_TIMEOUT_MS
@@ -79,6 +82,55 @@ async def run_course(
         logger.error("课程目录中没有可播放的视频课时.")
         logger.event("课程结果", 结果="无可用课时")
         return CourseOutcome.FAILED
+
+    if not learning and not getattr(config, "reviewCompletedCourses", False):
+        logger.info("平台已确认全部视频完成，停止本课程，不进入复习。", shift=True)
+        logger.event("课程结果", 结果="已完成，无需复习", 课时数=len(lessons))
+        return CourseOutcome.COMPLETED
+
+    if study_budget is not None:
+        study_budget.report(logger)
+        if study_budget.exhausted:
+            logger.info("今天已达到本课程每日学习额度，请明天再打开。", shift=True)
+            return CourseOutcome.DAILY_LIMIT
+        return await _run_with_daily_budget(
+            page, catalog, config, logger, playback_enabled, lessons, learning, study_budget
+        )
+    return await _play_lessons(page, catalog, config, logger, playback_enabled, lessons, learning)
+
+
+async def _run_with_daily_budget(
+    page, catalog, config, logger, playback_enabled, lessons, learning, budget
+):
+    runner = asyncio.create_task(
+        _play_lessons(page, catalog, config, logger, playback_enabled, lessons, learning)
+    )
+    monitor = asyncio.create_task(budget.monitor(page, playback_enabled, logger))
+    try:
+        done, _pending = await asyncio.wait((runner, monitor), return_when=asyncio.FIRST_COMPLETED)
+        if monitor in done:
+            result = await monitor  # Storage errors propagate: never continue unrecorded.
+            if result == "daily_limit":
+                budget.report(logger)
+                logger.info("今日本课程累计学习额度已用完，明天可继续剩余视频。", shift=True)
+                logger.event("课程结果", 结果="达到每日限额", 日期=budget.day)
+                return CourseOutcome.DAILY_LIMIT
+            return CourseOutcome.FAILED
+        result = await runner
+        budget.report(logger)
+        return result
+    finally:
+        playback_enabled.clear()
+        runner.cancel()
+        monitor.cancel()
+        await asyncio.gather(runner, monitor, return_exceptions=True)
+        try:
+            await page.evaluate("() => document.querySelector('video')?.pause()")
+        except Exception as exc:
+            logger.debug_throttled("daily_pause", f"停止本课程播放: {exc}")
+
+
+async def _play_lessons(page, catalog, config, logger, playback_enabled, lessons, learning):
 
     start_time = time.time()
     paused_time = 0.0
@@ -159,7 +211,7 @@ async def run_course(
         if index < len(lessons) - 1:
             logger.info(f'"{title}" 已完成!', shift=True)
             logger.info(
-                f"本次课程已学习:{elapsed_minutes(start_time, paused_time):.1f} min"
+                f"本轮课程计时:{elapsed_minutes(start_time, paused_time):.1f} min"
             )
 
     if learning:
